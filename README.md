@@ -568,43 +568,6 @@ const displayY = event.clientY - rect.top;
 
 ---
 
-## 📝 Notas para Contribuidores
-
-### Estándar de Código
-
-- **Nombres**: camelCase para variables/métodos, PascalCase para clases
-- **Comentarios**: En español, descriptivos
-- **Logging**: Usar `console.log` con emojis para visibility
-- **Async**: Usar `async/await`, evitar callbacks anidados
-- **Errores**: Siempre incluir `try/catch` con mensajes útiles
-
-### Git Workflow
-```bash
-git checkout -b feature/nueva-feature
-# ... hacer cambios ...
-git add .
-git commit -m "feat: descripción clara"
-git push origin feature/nueva-feature
-# → Crear Pull Request
-```
-
-### Testing
-- Test manual en Chrome, Firefox, Safari
-- Prueba en dispositivos móviles (responsive)
-- Verifica PDFs con 1, 5, 10+ páginas
-- Test múltiples usuarios firmando el mismo doc
-
----
-
-## 📞 Soporte y Contacto
-
-Para preguntas, bugs o sugerencias:
-1. Abre un issue en GitHub
-2. Describe el problema con detalles y logs
-3. Incluye pasos para reproducir
-
----
-
 ## 📄 Licencia
 
 Este proyecto es propiedad de **Constructora Centenario**. Uso restringido sin permiso explícito.
