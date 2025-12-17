@@ -756,37 +756,27 @@ class FileService {
     static async uploadFiles(files) {
         const uploadedFiles = [];
         const storage = new CloudStorageService();
-        
-        for (const file of Array.from(files)) {
+        // Ejecutar subidas en paralelo para acelerar tiempos
+        const tasks = Array.from(files).map(async (file) => {
             try {
                 const fileId = 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                
-                // Comprimir archivo si es necesario (máximo aumentado a 2048KB)
                 let fileToUpload = file;
                 try {
                     fileToUpload = await CompressionService.compressFile(file, 2048);
                 } catch (compressionError) {
-                    // Si no se puede comprimir, verificar si es demasiado grande
                     if (fileToUpload.size > 50 * 1024 * 1024) {
                         showNotification(`Error: ${file.name} excede 50MB (tamaño máximo de Supabase)`, 'error');
-                        continue;
+                        return null;
                     } else {
                         console.warn(`Advertencia: ${compressionError.message}`);
-                        // Continuar con el archivo original
                     }
                 }
-                
-                // Subir directamente a Supabase
                 try {
                     showNotification(`Subiendo ${file.name} a la nube...`);
-                    
-                    // Subir a Supabase Storage
                     const supabaseResult = await storage.supabase.uploadFile(
                         fileToUpload,
                         `users/${AppState.currentUser.uid}/uploads`
                     );
-                    
-                    // Preparar metadata SIN CONTENIDO BASE64
                     const fileData = {
                         id: fileId,
                         name: file.name,
@@ -803,36 +793,31 @@ class FileService {
                         url: supabaseResult.url,
                         storage_provider: 'supabase'
                     };
-                    
-                    // Guardar metadata en Firestore (sin contenido base64)
                     await storage.saveDocument(fileData);
-                    
-                    uploadedFiles.push(fileData);
                     this.files.push(fileData);
-                    
+                    uploadedFiles.push(fileData);
                     await storage.saveActivity({
                         type: 'file_upload',
                         description: `Subió el archivo: ${file.name}`,
                         documentName: file.name,
                         userName: AppState.currentUser.name
                     });
-                    
                     showNotification(`Archivo ${file.name} subido correctamente`);
-                    
+                    return fileData;
                 } catch (supabaseError) {
                     console.error('Error subiendo a Supabase:', supabaseError);
                     showNotification(`Error al subir ${file.name}: ${supabaseError.message}`, 'error');
+                    return null;
                 }
-                
             } catch (error) {
                 console.error('Error uploading file:', error);
                 showNotification(`Error al subir ${file.name}: ${error.message}`, 'error');
+                return null;
             }
-        }
-        
+        });
+        await Promise.all(tasks);
         DocumentService.refreshDocumentSelector();
         this.renderFilesGrid();
-        
         return uploadedFiles;
     }
 
@@ -1814,8 +1799,8 @@ class DocumentService {
                     resolve({
                         x: bestLine.x,
                         y: bestLine.y,
-                        width: 150,
-                        height: 60,
+                        width: 90,
+                        height: 36,
                         fieldType: 'horizontal_line',
                         confidence: 0.9,
                         reason: `Línea horizontal encontrada en Y=${bestLine.lineY}`
@@ -1833,8 +1818,8 @@ class DocumentService {
                     resolve({
                         x: bestSpot.x,
                         y: bestSpot.y,
-                        width: 150,
-                        height: 60,
+                        width: 90,
+                        height: 36,
                         fieldType: 'empty_space',
                         confidence: 0.8,
                         reason: `Espacio vacío detectado (${bestSpot.emptyPercent}% vacío)`
@@ -1849,8 +1834,8 @@ class DocumentService {
                 resolve({
                     x: fallbackPosition.x,
                     y: fallbackPosition.y,
-                    width: 150,
-                    height: 60,
+                    width: 90,
+                    height: 36,
                     fieldType: 'fallback',
                     confidence: 0.6,
                     reason: 'Posición basada en tipo de documento'
@@ -1862,8 +1847,8 @@ class DocumentService {
                 resolve({
                     x: 200,
                     y: 200,
-                    width: 150,
-                    height: 60,
+                    width: 90,
+                    height: 36,
                     fieldType: 'error_fallback',
                     confidence: 0.1,
                     reason: 'Error en análisis, usando posición predeterminada'
@@ -1909,9 +1894,9 @@ class DocumentService {
                     const spaceAboveY = Math.max(0, y - 70);
                     let spaceEmpty = true;
                     
-                    // Verificar espacio de 150x60px encima de la línea
+                    // Verificar espacio de 90x36px encima de la línea
                     for (let sy = spaceAboveY; sy < y && spaceEmpty; sy += 5) {
-                        for (let sx = startX; sx < startX + 150 && sx < width; sx += 5) {
+                        for (let sx = startX; sx < startX + 90 && sx < width; sx += 5) {
                             try {
                                 const pixel = ctx.getImageData(sx, sy, 1, 1).data;
                                 const brightness = (pixel[0] + pixel[1] + pixel[2]) / 3;
@@ -2464,7 +2449,7 @@ class DocumentService {
         for (let y = bottomArea.y; y < bottomArea.y + bottomArea.height; y += gridSpacing) {
             for (let x = 0; x < bottomArea.width; x += gridSpacing) {
                 // VERIFICAR SI HAY UN CUADRO EN ESTA POSICIÓN
-                const hasBox = this.detectBoxAtPosition(ctx, x, y, 150, 60);
+                const hasBox = this.detectBoxAtPosition(ctx, x, y, 90, 36);
                 
                 if (hasBox) {
                     // EL CENTRO DEL CUADRO ES BUEN LUGAR PARA UNA FIRMA
@@ -2528,7 +2513,7 @@ class DocumentService {
         // VERIFICAR CADA ZONA PARA CONTENIDO
         structuralZones.forEach(zone => {
             // VERIFICAR SI LA ZONA ESTÁ RELATIVAMENTE VACÍA
-            const isEmpty = this.isAreaEmptyDetailed(ctx, zone.x, zone.y, 150, 60, 0.7);
+            const isEmpty = this.isAreaEmptyDetailed(ctx, zone.x, zone.y, 90, 36, 0.7);
             
             if (isEmpty) {
                 spots.push({
@@ -2635,13 +2620,13 @@ class DocumentService {
             for (const sig of this.documentSignatures) {
                 const sigX = sig.x;
                 const sigY = sig.y;
-                const sigWidth = sig.width || 150;
-                const sigHeight = sig.height || 60;
+                const sigWidth = sig.width || 90;
+                const sigHeight = sig.height || 36;
                 
                 const spotX = spot.x;
                 const spotY = spot.y;
-                const spotWidth = spot.width || 150;
-                const spotHeight = spot.height || 60;
+                const spotWidth = spot.width || 90;
+                const spotHeight = spot.height || 36;
                 
                 // VERIFICAR SUPERPOSICIÓN
                 const overlap = !(spotX + spotWidth < sigX ||
@@ -2678,7 +2663,7 @@ class DocumentService {
             // VERIFICAR SI EL ÁREA ESTÁ VACÍA
             let isEmpty = true;
             for (let dy = 0; dy < 60; dy += 10) {
-                for (let dx = 0; dx < 150; dx += 10) {
+                for (let dx = 0; dx < 90; dx += 10) {
                     const x = zone.x + dx;
                     const y = zone.y + dy;
                     
@@ -2800,15 +2785,15 @@ class DocumentService {
         console.log('🚨 BÚSQUEDA DE EMERGENCIA DE ESPACIOS...');
         
         // ESCANEAR SISTEMÁTICAMENTE TODO EL DOCUMENTO
-        for (let y = 0; y < height - 60; y += 10) {
-            for (let x = 0; x < width - 150; x += 10) {
+        for (let y = 0; y < height - 36; y += 10) {
+            for (let x = 0; x < width - 90; x += 10) {
                 let emptyCount = 0;
                 let totalCount = 0;
                 
                 // VERIFICAR 10 PUNTOS ALEATORIOS EN EL ÁREA
                 for (let i = 0; i < 10; i++) {
-                    const rx = x + Math.floor(Math.random() * 150);
-                    const ry = y + Math.floor(Math.random() * 60);
+                    const rx = x + Math.floor(Math.random() * 90);
+                    const ry = y + Math.floor(Math.random() * 36);
                     
                     if (rx < width && ry < height) {
                         const pixel = ctx.getImageData(rx, ry, 1, 1).data;
@@ -2857,10 +2842,10 @@ class DocumentService {
             ctx.strokeStyle = index === 0 ? '#00ff00' : '#ffff00';
             ctx.lineWidth = 2;
             ctx.strokeRect(
-                spot.x - (spot.width || 150) / 2,
-                spot.y - (spot.height || 60) / 2,
-                spot.width || 150,
-                spot.height || 60
+                spot.x - (spot.width || 90) / 2,
+                spot.y - (spot.height || 36) / 2,
+                spot.width || 90,
+                spot.height || 36
             );
         });
         
@@ -3012,8 +2997,8 @@ class DocumentService {
             
             for (let y = bottomScanY; y < bottomScanY + bottomScanHeight; y += scanStep) {
                 for (let x = 50; x < width - 200; x += scanStep) {
-                    // Verificar área de 150x60px
-                    if (this.isAreaTrulyEmpty(ctx, x, y, 150, 60)) {
+                    // Verificar área de 90x36px
+                    if (this.isAreaTrulyEmpty(ctx, x, y, 90, 36)) {
                         console.log(`✅ Espacio encontrado en (${x}, ${y})`);
                         return {
                             found: true,
@@ -3191,7 +3176,7 @@ class DocumentService {
             
             for (const pos of positions) {
                 // Verificar si hay espacio para una firma
-                if (this.isAreaTrulyEmpty(ctx, pos.x, pos.y, 150, 60)) {
+                if (this.isAreaTrulyEmpty(ctx, pos.x, pos.y, 110, 45)) {
                     return {
                         found: true,
                         x: pos.x,
@@ -3221,7 +3206,7 @@ class DocumentService {
             if (this.isAreaTrulyEmpty(ctx, startX, startY, spaceWidth, spaceHeight)) {
                 return {
                     found: true,
-                    x: startX + (spaceWidth / 2) - 75, // Centrar la firma
+                    x: startX + (spaceWidth / 2) - 45, // Centrar la firma
                     y: startY + 10
                 };
             }
@@ -3245,22 +3230,22 @@ class DocumentService {
             // Documento horizontal (contratos, facturas)
             console.log('📄 Documento horizontal detectado - colocando en esquina inferior derecha');
             return { 
-                x: width * 0.75 - 100, 
-                y: height * 0.85 - 30 
+                x: width * 0.75 - 45, 
+                y: height * 0.85 - 18 
             };
         } else if (aspectRatio < 0.8) {
             // Documento vertical estrecho (recibos, tickets)
             console.log('📄 Documento vertical estrecho detectado - colocando en esquina inferior izquierda');
             return { 
                 x: width * 0.15, 
-                y: height * 0.85 - 30 
+                y: height * 0.85 - 18 
             };
         } else {
             // Documento estándar (cartas, informes)
             console.log('📄 Documento estándar detectado - colocando en esquina inferior derecha');
             return { 
-                x: width * 0.7 - 100, 
-                y: height * 0.88 - 30 
+                x: width * 0.7 - 45, 
+                y: height * 0.88 - 18 
             };
         }
     }
@@ -3842,8 +3827,8 @@ class DocumentService {
             ];
             
             for (const pos of positions) {
-                // Verificar si hay espacio para una firma (150x60)
-                if (this.isAreaEmptyForSignature(ctx, pos.x, pos.y, 150, 60)) {
+                // Verificar si hay espacio para una firma (90x36)
+                if (this.isAreaEmptyForSignature(ctx, pos.x, pos.y, 90, 36)) {
                     return {
                         found: true,
                         x: pos.x,
@@ -3990,8 +3975,8 @@ class DocumentService {
                 height: height * 0.15
             };
             
-            // Buscar espacio para firma de 150x60
-            const spaceNeeded = { width: 150, height: 60 };
+            // Buscar espacio para firma de 90x36
+            const spaceNeeded = { width: 90, height: 36 };
             
             for (let y = searchArea.y; y < searchArea.y + searchArea.height - spaceNeeded.height; y += 10) {
                 for (let x = searchArea.x; x < searchArea.x + searchArea.width - spaceNeeded.width; x += 10) {
@@ -4026,8 +4011,8 @@ class DocumentService {
                 height: height * 0.15
             };
             
-            // Buscar espacio para firma de 150x60
-            const spaceNeeded = { width: 150, height: 60 };
+            // Buscar espacio para firma de 90x36
+            const spaceNeeded = { width: 90, height: 36 };
             
             for (let y = searchArea.y; y < searchArea.y + searchArea.height - spaceNeeded.height; y += 10) {
                 for (let x = searchArea.x; x < searchArea.x + searchArea.width - spaceNeeded.width; x += 10) {
@@ -4822,7 +4807,7 @@ class DocumentService {
     static findBoxedSignatureArea(ctx, area) {
         try {
             // Buscar rectángulos vacíos
-            const boxSize = 150; // Tamaño típico de caja de firma
+            const boxSize = 90; // Tamaño típico de caja de firma
             
             // Posiciones comunes para cajas de firma
             const possiblePositions = [
@@ -4833,11 +4818,11 @@ class DocumentService {
             
             for (const pos of possiblePositions) {
                 // Verificar si el área está vacía
-                const isEmpty = this.checkAreaEmpty(ctx, pos.x, pos.y, boxSize, 60);
+                const isEmpty = this.checkAreaEmpty(ctx, pos.x, pos.y, boxSize, 36);
                 
                 if (isEmpty) {
                     // Verificar bordes (líneas horizontales arriba y abajo)
-                    const hasBorders = this.checkAreaBorders(ctx, pos.x, pos.y, boxSize, 60);
+                    const hasBorders = this.checkAreaBorders(ctx, pos.x, pos.y, boxSize, 36);
                     
                     if (hasBorders) {
                         return {
@@ -4845,7 +4830,7 @@ class DocumentService {
                             x: pos.x + 10,
                             y: pos.y + 10,
                             width: boxSize,
-                            height: 60
+                            height: 36
                         };
                     }
                 }
@@ -5000,11 +4985,11 @@ class DocumentService {
                 const touchX = touch.clientX;
                 const touchY = touch.clientY;
                 
-                // Buscar handles cercanos (radio de 40px)
-                // Esto soluciona el problema de "dedo gordo" y z-index
+                // Detectar handle más cercano (radio de 24px) para entrar en modo redimensión
+                // Si no hay handle cercano, entra en modo arrastre
                 const handles = element.querySelectorAll('.signature-handle');
                 let closestHandle = null;
-                let minDistance = 40; // Radio de búsqueda generoso
+                let minDistance = 24; // Radio de búsqueda equilibrado
                 
                 handles.forEach(handle => {
                     const rect = handle.getBoundingClientRect();
@@ -5130,11 +5115,22 @@ class DocumentService {
     // ===========================================
     // NUEVO: REDIMENSIÓN NATIVA PARA TOUCH
     // ===========================================
-    static startResizeTouch(e, element, signatureData) {
+    static startResizeTouch(e, element, signatureData, passedHandle) {
         const touch = e.touches[0];
         const canvas = document.getElementById('documentCanvas');
-        const handle = document.elementFromPoint((touch.pageX || touch.clientX), (touch.pageY || touch.clientY));
-        const handleClass = handle?.className || '';
+        // Usar el handle detectado previamente si está disponible
+        let handleClass = passedHandle?.className || '';
+        let classListArr = Array.isArray(passedHandle?.classList) ? Array.from(passedHandle.classList) : (handleClass ? handleClass.split(' ') : []);
+        if (!handleClass) {
+            // elementFromPoint requiere coordenadas de viewport (clientX/clientY)
+            const handle = document.elementFromPoint(touch.clientX, touch.clientY);
+            handleClass = handle?.className || '';
+            classListArr = Array.isArray(handle?.classList) ? Array.from(handle.classList) : (handleClass ? handleClass.split(' ') : []);
+        }
+        const isRight = classListArr.includes('handle-right') || classListArr.includes('handle-top-right') || classListArr.includes('handle-bottom-right');
+        const isLeft = classListArr.includes('handle-left') || classListArr.includes('handle-top-left') || classListArr.includes('handle-bottom-left');
+        const isTop = classListArr.includes('handle-top') || classListArr.includes('handle-top-left') || classListArr.includes('handle-top-right');
+        const isBottom = classListArr.includes('handle-bottom') || classListArr.includes('handle-bottom-left') || classListArr.includes('handle-bottom-right');
         const startCoords = canvas ? this.getPreciseTouchCoordinates(touch, canvas) : { displayX: touch.clientX, displayY: touch.clientY };
         const startX = startCoords.displayX;
         const startY = startCoords.displayY;
@@ -5157,17 +5153,17 @@ class DocumentService {
             let newLeft = startLeft;
             let newTop = startTop;
             
-            if (handleClass.includes('handle-right')) {
+            if (isRight) {
                 newWidth = Math.max(minWidth, startWidth + dx);
             }
-            if (handleClass.includes('handle-left')) {
+            if (isLeft) {
                 newWidth = Math.max(minWidth, startWidth - dx);
                 newLeft = startLeft + dx;
             }
-            if (handleClass.includes('handle-bottom')) {
+            if (isBottom) {
                 newHeight = Math.max(minHeight, startHeight + dy);
             }
-            if (handleClass.includes('handle-top')) {
+            if (isTop) {
                 newHeight = Math.max(minHeight, startHeight - dy);
                 newTop = startTop + dy;
             }
@@ -5334,7 +5330,11 @@ class DocumentService {
         e.stopPropagation();
         
         const handle = e.target;
-        const handleType = Array.from(handle.classList).find(cls => cls.includes('handle-'));
+        const classListArr = Array.from(handle.classList);
+        const isRight = classListArr.includes('handle-right') || classListArr.includes('handle-top-right') || classListArr.includes('handle-bottom-right');
+        const isLeft = classListArr.includes('handle-left') || classListArr.includes('handle-top-left') || classListArr.includes('handle-bottom-left');
+        const isTop = classListArr.includes('handle-top') || classListArr.includes('handle-top-left') || classListArr.includes('handle-top-right');
+        const isBottom = classListArr.includes('handle-bottom') || classListArr.includes('handle-bottom-left') || classListArr.includes('handle-bottom-right');
         
         const startX = e.clientX;
         const startY = e.clientY;
@@ -5355,17 +5355,17 @@ class DocumentService {
             let newLeft = startLeft;
             let newTop = startTop;
             
-            if (handleType?.includes('handle-right')) {
+            if (isRight) {
                 newWidth = Math.max(minWidth, startWidth + dx);
             }
-            if (handleType?.includes('handle-left')) {
+            if (isLeft) {
                 newWidth = Math.max(minWidth, startWidth - dx);
                 newLeft = startLeft + dx;
             }
-            if (handleType?.includes('handle-bottom')) {
+            if (isBottom) {
                 newHeight = Math.max(minHeight, startHeight + dy);
             }
-            if (handleType?.includes('handle-top')) {
+            if (isTop) {
                 newHeight = Math.max(minHeight, startHeight - dy);
                 newTop = startTop + dy;
             }
@@ -5778,12 +5778,13 @@ class DocumentService {
         try {
             const rect = canvas.getBoundingClientRect();
 
-            // pageX/pageY y considerar scroll son más fiables en móviles
-            const pageX = (touch.pageX !== undefined) ? touch.pageX - window.scrollX : (touch.clientX - window.scrollX);
-            const pageY = (touch.pageY !== undefined) ? touch.pageY - window.scrollY : (touch.clientY - window.scrollY);
+            // Convertir a coordenadas de viewport sin doble restar scroll
+            // (evita desplazamientos al colocar/mover en móviles con scroll)
+            const clientX = (touch.pageX !== undefined) ? (touch.pageX - window.scrollX) : touch.clientX;
+            const clientY = (touch.pageY !== undefined) ? (touch.pageY - window.scrollY) : touch.clientY;
 
-            const displayX = pageX - rect.left;
-            const displayY = pageY - rect.top;
+            const displayX = clientX - rect.left;
+            const displayY = clientY - rect.top;
 
             // Mapping de display (CSS) -> canvas pixel
             const scaleX = rect.width > 0 ? (canvas.width / rect.width) : 1;
@@ -6211,9 +6212,9 @@ class DocumentService {
             <div class="signature-handle handle-bottom-right"></div>
         `;
         
-        // USAR EL NUEVO MÉTODO MEJORADO
-        this.makeSignatureInteractive(signatureElement, signature);
-        return signatureElement;
+            // Hacer la firma interactiva: arrastre y redimensión (mouse y touch)
+            this.makeSignatureInteractive(signatureElement, signature);
+            return signatureElement;
     }
 
     // ===========================================
@@ -6479,8 +6480,8 @@ class DocumentService {
             }
             
             // Calcular tamaño de la firma
-            let width = 150;
-            let height = 60;
+            let width = 90;
+            let height = 36;
             
             if (this.currentSignature.type === 'upload') {
                 const img = new Image();
@@ -6494,8 +6495,8 @@ class DocumentService {
                 width = img.naturalWidth;
                 height = img.naturalHeight;
                 
-                const maxWidth = 200;
-                const maxHeight = 80;
+                const maxWidth = 110;
+                const maxHeight = 45;
                 
                 if (width > maxWidth || height > maxHeight) {
                     const ratio = Math.min(maxWidth / width, maxHeight / height);
@@ -6528,8 +6529,8 @@ class DocumentService {
                 y: position.y,
                 width: width,
                 height: height,
-                // Coordenadas normalizadas respecto al canvas (0..1). Esto hace que
-                // la posición sea independiente del zoom CSS o del tamaño visual.
+            // Coordenadas normalizadas respecto al canvas (0..1) para ser independientes
+            // del zoom CSS y del tamaño visual del canvas.
                 normX: (function(){
                     try { const c = document.getElementById('documentCanvas'); return c && c.width ? (position.x / c.width) : 0; } catch(e){return 0}
                 })(),
@@ -6832,6 +6833,7 @@ class DocumentExportService {
 
         try {
             if (DocumentService.currentDocument.type === 'application/pdf') {
+                // Forzar ruta robusta basada en canvas para respetar rotaciones/orientaciones
                 return await this.combineWithPDF();
             } else if (DocumentService.currentDocument.type.startsWith('image/')) {
                 return await this.combineWithImage();
@@ -6841,6 +6843,55 @@ class DocumentExportService {
         } catch (error) {
             console.error('Error al combinar firmas:', error);
             throw new Error('Error al combinar las firmas con el documento: ' + error.message);
+        }
+    }
+
+    static async combineWithPDFDirect() {
+        try {
+            const { PDFDocument } = window.PDFLib;
+            const response = await fetch(DocumentService.currentDocument.url, { cache: 'no-store' });
+            const originalPdfBytes = await response.arrayBuffer();
+            const pdfDoc = await PDFDocument.load(originalPdfBytes, { updateMetadata: false });
+            const pages = pdfDoc.getPages();
+            const displayCanvas = document.getElementById('documentCanvas');
+            const pixelWidth = displayCanvas?.width || pages[0]?.getSize()?.width || 1;
+            const pixelHeight = displayCanvas?.height || pages[0]?.getSize()?.height || 1;
+            
+            for (let i = 0; i < pages.length; i++) {
+                const page = pages[i];
+                const { width: pageWidth, height: pageHeight } = page.getSize();
+                const signatures = (DocumentService.documentSignatures || []).filter(s => (s.page || 1) === (i + 1));
+                for (const s of signatures) {
+                    let embeddedImage;
+                    const isPng = (s.data || '').startsWith('data:image/png');
+                    if (isPng) {
+                        embeddedImage = await pdfDoc.embedPng(s.data);
+                    } else {
+                        embeddedImage = await pdfDoc.embedJpg(s.data);
+                    }
+                    const drawWidth = (typeof s.normWidth === 'number')
+                        ? (s.normWidth * pageWidth)
+                        : (((s.width || embeddedImage.width) / pixelWidth) * pageWidth);
+                    const drawHeight = (typeof s.normHeight === 'number')
+                        ? (s.normHeight * pageHeight)
+                        : (((s.height || embeddedImage.height) / pixelHeight) * pageHeight);
+                    const x = (typeof s.normX === 'number')
+                        ? (s.normX * pageWidth)
+                        : (((s.x || 0) / pixelWidth) * pageWidth);
+                    const yTop = (typeof s.normY === 'number')
+                        ? (s.normY * pageHeight)
+                        : (((s.y || 0) / pixelHeight) * pageHeight);
+                    const y = pageHeight - yTop - drawHeight;
+                    page.drawImage(embeddedImage, { x, y, width: drawWidth, height: drawHeight });
+                }
+            }
+            const pdfBytes = await pdfDoc.save({ useObjectStreams: true });
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            return { blob: blob, url: url, type: 'application/pdf', fileName: `documento_firmado_${Date.now()}.pdf` };
+        } catch (error) {
+            console.error('Error en combineWithPDFDirect:', error);
+            throw error;
         }
     }
 
@@ -6854,7 +6905,7 @@ class DocumentExportService {
                 const displayCanvas = document.getElementById('documentCanvas');
                 const signatureLayer = document.getElementById('signatureLayer');
 
-                // canvas para composición por página
+                // Canvas por página para composición visual 1:1
                 const { jsPDF } = window.jspdf;
                 let pdfOutput = null;
 
@@ -6862,6 +6913,7 @@ class DocumentExportService {
                     const page = await pdf.getPage(p);
                     const scale = 2.0;
                     const viewport = page.getViewport({ scale });
+                    const viewportPts = page.getViewport({ scale: 1 }); // Tamaño original de la página en puntos
 
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
@@ -6870,6 +6922,10 @@ class DocumentExportService {
 
                     ctx.imageSmoothingEnabled = true;
                     ctx.imageSmoothingQuality = 'high';
+
+                    // Rellenar fondo blanco para asegurar que JPEG no salga negro en transparencias
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
                     const renderContext = { canvasContext: ctx, viewport };
                     await page.render(renderContext).promise;
@@ -6911,22 +6967,22 @@ class DocumentExportService {
                         }
                     }
 
-                    // Añadir página al jsPDF
-                    const isLandscape = canvas.width > canvas.height;
+                    // Añadir página al jsPDF usando tamaño ORIGINAL de la página (pt) y orientación detectada
+                    const isLandscape = viewportPts.width > viewportPts.height;
                     const orientation = isLandscape ? 'landscape' : 'portrait';
 
                     if (!pdfOutput) {
-                        pdfOutput = new jsPDF({ 
-                            orientation: orientation, 
-                            unit: 'px', 
-                            format: [canvas.width, canvas.height] 
+                        pdfOutput = new jsPDF({
+                            orientation: orientation,
+                            unit: 'pt',
+                            format: [viewportPts.width, viewportPts.height]
                         });
-                        const imgData = canvas.toDataURL('image/png', 1.0);
-                        pdfOutput.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height, undefined, 'FAST');
+                        const imgData = canvas.toDataURL('image/jpeg', 0.75);
+                        pdfOutput.addImage(imgData, 'JPEG', 0, 0, viewportPts.width, viewportPts.height, undefined, 'FAST');
                     } else {
-                        pdfOutput.addPage([canvas.width, canvas.height], orientation);
-                        const imgData = canvas.toDataURL('image/png', 1.0);
-                        pdfOutput.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height, undefined, 'FAST');
+                        pdfOutput.addPage([viewportPts.width, viewportPts.height], orientation);
+                        const imgData = canvas.toDataURL('image/jpeg', 0.75);
+                        pdfOutput.addImage(imgData, 'JPEG', 0, 0, viewportPts.width, viewportPts.height, undefined, 'FAST');
                     }
                 }
 
@@ -7761,16 +7817,16 @@ class SignatureFieldDetector {
             return {
                 x: width * 0.75 - 75,
                 y: height * 0.85 - 30,
-                width: 150,
-                height: 60
+                width: 90,
+                height: 36
             };
         } else {
             // Vertical
             return {
                 x: width * 0.65 - 75,
                 y: height * 0.88 - 30,
-                width: 150,
-                height: 60
+                width: 90,
+                height: 36
             };
         }
     }
@@ -8177,6 +8233,17 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 showNotification('Error en el inicio de sesión', 'error');
             }
+        });
+    }
+    const togglePassword = document.getElementById('togglePassword');
+    if (togglePassword) {
+        togglePassword.addEventListener('click', function() {
+            const input = document.getElementById('password');
+            if (!input) return;
+            const isText = input.type === 'text';
+            input.type = isText ? 'password' : 'text';
+            const icon = this.querySelector('i');
+            if (icon) icon.className = isText ? 'fas fa-eye' : 'fas fa-eye-slash';
         });
     }
     
