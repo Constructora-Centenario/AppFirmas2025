@@ -4963,11 +4963,11 @@ class DocumentService {
                 const touchX = touch.clientX;
                 const touchY = touch.clientY;
                 
-                // Detectar handle más cercano (radio de 24px) para entrar en modo redimensión
+                // Detectar handle más cercano (radio de 45px para mejor tacto) para entrar en modo redimensión
                 // Si no hay handle cercano, entra en modo arrastre
                 const handles = element.querySelectorAll('.signature-handle');
                 let closestHandle = null;
-                let minDistance = 24; // Radio de búsqueda equilibrado
+                let minDistance = 45; // Radio de búsqueda aumentado para facilitar agarre en móvil
                 
                 handles.forEach(handle => {
                     const rect = handle.getBoundingClientRect();
@@ -5277,9 +5277,14 @@ class DocumentService {
                     if (displayWidth > 0 && displayHeight > 0) {
                         signatureData.x = Math.round((newLeft / displayWidth) * pixelWidth);
                         signatureData.y = Math.round((newTop / displayHeight) * pixelHeight);
+                        // Actualizar valores normalizados para que el zoom funcione correctamente
+                        signatureData.normX = +(signatureData.x / pixelWidth) || 0;
+                        signatureData.normY = +(signatureData.y / pixelHeight) || 0;
                     } else {
                         signatureData.x = Math.round(newLeft);
                         signatureData.y = Math.round(newTop);
+                        signatureData.normX = 0;
+                        signatureData.normY = 0;
                     }
                 } else {
                     signatureData.x = Math.round(newLeft);
@@ -6889,7 +6894,8 @@ class DocumentExportService {
 
                 for (let p = 1; p <= numPages; p++) {
                     const page = await pdf.getPage(p);
-                    const scale = 2.0;
+                    // Aumentar escala a 3.0 para mejor resolución (evitar pixelado)
+                    const scale = 3.0;
                     const viewport = page.getViewport({ scale });
                     const viewportPts = page.getViewport({ scale: 1 }); // Tamaño original de la página en puntos
 
@@ -6955,12 +6961,13 @@ class DocumentExportService {
                             unit: 'pt',
                             format: [viewportPts.width, viewportPts.height]
                         });
-                        const imgData = canvas.toDataURL('image/jpeg', 0.75);
-                        pdfOutput.addImage(imgData, 'JPEG', 0, 0, viewportPts.width, viewportPts.height, undefined, 'FAST');
+                        // Usar calidad alta (0.95) y compresión SLOW para mejor resultado visual
+                        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                        pdfOutput.addImage(imgData, 'JPEG', 0, 0, viewportPts.width, viewportPts.height, undefined, 'SLOW');
                     } else {
                         pdfOutput.addPage([viewportPts.width, viewportPts.height], orientation);
-                        const imgData = canvas.toDataURL('image/jpeg', 0.75);
-                        pdfOutput.addImage(imgData, 'JPEG', 0, 0, viewportPts.width, viewportPts.height, undefined, 'FAST');
+                        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                        pdfOutput.addImage(imgData, 'JPEG', 0, 0, viewportPts.width, viewportPts.height, undefined, 'SLOW');
                     }
                 }
 
@@ -7649,7 +7656,7 @@ class SignatureFieldDetector {
                     return;
                 }
                 
-                // Filtrar campos que no estén ocupados por firmas existentes
+                // Filtrar campos que no estén ocupados por firas existentes
                 const availableFields = this.filterOccupiedFields(allFields, existingSignatures);
                 
                 // Si hay campos disponibles, usar el mejor
